@@ -21,6 +21,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define SERVER_IP  	"127.0.0.1"
 #define SERVER_PORT 	5001
@@ -33,7 +36,7 @@ int main()
 	struct sockaddr_in serv_addr; 
 	struct sockaddr_in    cli_addr; 
 	char serv_buffer[SERVER_BUFF];
-
+	ssize_t num;
 	printf("Emertxe: Server is waiting...\n");
 
 	/* Create a UDP socket */
@@ -45,61 +48,111 @@ int main()
 	serv_addr.sin_port = htons(SERVER_PORT); 
 
 	bind(sock_fd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)); 
-	int pid, pno = 20000;
+	int pid, pno = 20001;
 
 
 	/* Try to get some actual data from client */
 	cli_len = sizeof(struct sockaddr_in);
 	int bytes;
+
+
 	while(1)
 	{
-		if((bytes = recvfrom(sock_fd,(void *)serv_buffer,SERVER_BUFF,0,(struct sockaddr *) &cli_addr, &cli_len)) != 0)
+		//Receive first message from client
+		num = recvfrom(sock_fd,(void *)serv_buffer,SERVER_BUFF,0,(struct sockaddr *) &cli_addr, &cli_len);
+		if(num > 0)
 		{
-
-			//increment port number
 			pno++;
-			//we will fork
-			pid = fork();
-
-
-			if(pid == 0)
+			char k[10];
 			{
-				char k[10];
-				sprintf(k, "%d", pno);
-				sendto(sock_fd, k, strlen(k) + 1, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));
-				close(sock_fd);
-				int ch_sfd;
 
-				/* Create a UDP socket */
-				ch_sfd = socket(AF_INET, SOCK_DGRAM, 0);
+				//increment port number
+				//we will fork
+				pid = fork();
 
-				/* Bind it to a particular IP address & port) */
-				serv_addr.sin_family = AF_INET;
-				serv_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
-				serv_addr.sin_port = htons(pno); 
 
-				bind(ch_sfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)); 
+				if(pid == 0)
+				{
+					char k[10], temp[50];
+					char *cmd = NULL, *name = NULL;
+					sprintf(k, "%d", pno);
+					sendto(sock_fd, k, strlen(k) + 1, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));
+					close(sock_fd);
+					int ch_sfd;
+					char fname[20], *temp1 = NULL ;
+					char *saveptr, *saveptr1;
 
+					//Create packets
+					char *rwpack = (char *)malloc(2);
+					char *ackpack = (char *)malloc(4);
+					char *dpack = (char *)malloc(4);
+					char *erpack = (char *)malloc(4);
+
+
+					//Create new sock fd with new port number
+					ch_sfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+					serv_addr.sin_family = AF_INET;
+					serv_addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+					serv_addr.sin_port = htons(pno); 
+
+					bind(ch_sfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)); 
+					while(1)
+					{
+						recvfrom(sock_fd,(void *)serv_buffer,SERVER_BUFF,0,(struct sockaddr *) &cli_addr, &cli_len);
+						printf("received via %d new port %s\n", pno, serv_buffer);
+
+
+						//Tftp starts from here
+						strcpy(temp, serv_buffer);
+						printf("%s\n", temp);
+						cmd = strtok_r(temp, " ", &saveptr);
+						printf("cmd : %s\n", cmd);
+						name = strtok_r(NULL, " ", &saveptr);
+						printf("name : %s\n", name);
+						
+						if(cmd[1] == '0')
+						{
+							char tmp[50] = {'\0'};
+							strcat(tmp,&cmd[2]);
+							printf("file name : %s\n", tmp);
+							
+							printf("we received a get cmd\n");
+						//	recvfrom(sock_fd,(void *)serv_buffer,SERVER_BUFF,0,(struct sockaddr *) &cli_addr, &cli_len);
+							printf("received the RRQ req via  %d new port %s\n", pno, serv_buffer);
+							//strcpy(temp, serv_buffer);
+							//printf("temp : %s\n", serv_buffer);
+							//temp1 = strtok_r(temp, " ", &saveptr1);
+							
+							strcpy(fname, tmp);
+							printf("fname: %s\n", fname);
+							int fd;
+							char *buff = malloc(513 * sizeof(char));
+							if((fd = open(fname, O_RDWR | O_EXCL | O_TRUNC , 00777) != -1))
+							{
+								while(read(fd, buff, 513) > 0)
+								{
+									sendto(sock_fd, buff, strlen(buff) + 1, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));	
+								}
+								
+							}
+							close(fd);
+
+						}
+						if(strcmp(cmd, "put") == 0)
+						{
+							printf("we received a put cmd\n");
+						}
+						if(strcmp(cmd, "quit") == 0)
+						{
+							//							exit(0);
+						}
+
+					}
+				}
 			}
 		}
-		//in child process
-		/*
-		   bind to the new port
-		   and communicate
 
-		 */
-
-		// parent process should be in loop keeps on running
-
-
-		/* Print the data received from client */
-		printf("Here is the client data: %s\n",serv_buffer);
-
-		printf("Sender Info:\n");
-		printf("Sender IP: %s\n", inet_ntoa(cli_addr.sin_addr));
-		printf("Sender Port: %d\n", ntohs(cli_addr.sin_port));
-
-		/* Close the socket now */
-		close(sock_fd);
 	}
+	close(sock_fd);
 }
