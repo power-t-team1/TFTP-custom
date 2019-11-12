@@ -22,11 +22,15 @@ int main()
 	struct sockaddr_in cli_addr; 
 	char serv_buffer[SERVER_BUFF];
 	char child_port[8] = {'\0'};
-	int pid, child_port_number = 20000;
+	int pid, wait = 50000, child_port_number = 20000;
 	char *filename = NULL;
+	char *error = NULL;
 	FILE *fd = NULL;
 	char buffer[512] = {'\0'};
 	char *packet = NULL;
+	char ack_packet[4];
+	int len;
+	char data_buffer[516];
 	short count;
 
 	/* Create a UDP socket */
@@ -83,6 +87,7 @@ int main()
 					printf("Sender IP: %s\n", inet_ntoa(cli_addr.sin_addr));
 					printf("Sender Port: %d\n", ntohs(cli_addr.sin_port));
 					
+					//Section to handle get command from client
 					if (serv_buffer[1] == '1')
 					{
 						filename = strtok(&serv_buffer[2], "0");
@@ -91,9 +96,20 @@ int main()
 						fd =  fopen(filename, "r");
 						if (fd == NULL)
 						{
-							perror("fopen");
+							perror(filename);
+							error = malloc(4);
+							error[0] = '0';
+							error[1] = '5';
+							error[2] = '0';
+							error[3] = '1';
+							error = realloc (error, (strlen(filename) + 16));
+							strcat(error, filename);
+							strcat(error, " not found0\n");
+
+							sendto(child_sock_fd, error, strlen(error) + 1, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));
+							continue;
 						}
-						
+
 						packet = malloc(4);
 						packet[0] = '0';
 						packet[1] = '3';
@@ -117,39 +133,79 @@ int main()
 
 							sendto(child_sock_fd, packet, strlen(packet) + 1, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));
 
+							recvfrom(child_sock_fd,(void *)serv_buffer,SERVER_BUFF,0,(struct sockaddr *) &cli_addr, &cli_len);
+
+							while(serv_buffer[1] != '4')
+							{	
+								while(wait)
+								{
+									wait--;
+								}
+								wait = 50000;
+
+								sendto(child_sock_fd, packet, strlen(packet) + 1, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));
+
+								recvfrom(child_sock_fd,(void *)serv_buffer,SERVER_BUFF,0,(struct sockaddr *) &cli_addr, &cli_len);
+
+								if (serv_buffer[1] != '4')
+								{
+									continue;
+								}
+								else
+								{
+									break;
+								}
+							}
 							printf("Message sent\n");
 
 						}
 
 					}
+
+					//Section to handle put command from client
 					else if (serv_buffer[1] == '2')
 					{
 						filename = strtok(&serv_buffer[2], "0");
 						printf("Filename: %s\n", filename);
+						while(len = recvfrom(child_sock_fd,(void *)data_buffer,sizeof(data_buffer),0,(struct sockaddr *) &cli_addr, &cli_len))
+						{
+							if (data_buffer[1] == '3')
+							{
+								printf("Data from client \n%s", data_buffer);
+
+								//Require to write the received data into a file
+
+								ack_packet[0] = '0';
+								ack_packet[1] = '4';
+								ack_packet[2] = data_buffer[2];
+								ack_packet[3] = data_buffer[3];
+
+								sendto(child_sock_fd, ack_packet, strlen(ack_packet) + 1, 0, (struct sockaddr *)&cli_addr, sizeof(cli_addr));
+
+								if (len < 512)
+								{
+									break;
+								}
+							}
+							else if(data_buffer[1] == '5')
+							{
+								printf("Error: %s", data_buffer);
+								break;
+							}
+						}
 					}
+
+					//Section to handle Exit call from the client
 					else if (!(strcmp(serv_buffer, "exit")) || !(strcmp(serv_buffer, "bye")))
 					{
 						close(child_sock_fd);
 						exit(0);
 
 					}
-					
+
 
 				}
 			}
 		}
-		//in child process
-		/*
-		   bind to the new port
-		   and communicate
-
-		 */
-
-		// parent process should be in loop keeps on running
-
-
-
-		/* Close the socket now */
-		//	close(sock_fd);
 	}
 }
